@@ -55,15 +55,10 @@ class Agent(object):
         results = self.bzrc.do_commands(self.commands)
 
 	def align_to_pot_vector(self, tank, vector):
-		command = Command(tank.index, 0, 0, False)
-		
 		# Turn to face the angle proscribed by the vector
 		vector_angle = math.atan2(vector.y, vector.x)
 		angle_diff = self.normalize_angle(vector_angle - tank.angle)
-		
-		
-		# Determine if we should move ahead, and how fast
-		
+		command = Command(tank.index, 1, 2 * angle_diff, False)
 		
 		# Append the command
 		self.commands.append(command)
