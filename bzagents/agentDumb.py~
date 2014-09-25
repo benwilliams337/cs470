@@ -65,7 +65,7 @@ class Agent(object):
             
             tank.move_time_diff = time.time() - tank.last_move
             tank.shoot_time_diff = time.time() - tank.last_shoot
-            tank.angle = mytanks[i].angle
+            
         
         
         
