@@ -24,12 +24,11 @@ import sys
 import math
 import time
 import random
+from numpy import *
 
 import show_field
 
 from bzrc import BZRC, Command
-
-field_to_render = []
 
 class Agent(object):
 	"""Class handles all command and control logic for a teams tanks."""
@@ -64,22 +63,24 @@ class Agent(object):
 					potField = self.have_flag_pot_field
 				else:
 					potField = self.no_flag_pot_field
-				vector = potField[self.get_world_size() / 2 + int(tank.x)][self.get_world_size() / 2 + int(tank.y)]
+				randField = self.build_random_field()
+				potField = self.combine_fields(potField, randField, 0.8, 0.2)
+				vector = [potField[0][self.world_to_field_coord(int(tank.x))][self.world_to_field_coord(int(tank.y))],potField[1][self.world_to_field_coord(int(tank.x))][self.world_to_field_coord(int(tank.y))]]
 				self.align_to_pot_vector(tank, vector)
 
 		results = self.bzrc.do_commands(self.commands)
 
 	def align_to_pot_vector(self, tank, vector):
 		# Turn to face the angle proscribed by the vector
-		vector_mag = ((vector.x ** 2 + vector.y ** 2) ** 0.5) / (2 ** 0.5)
+		vector_mag = ((vector[0] ** 2 + vector[1] ** 2) ** 0.5) / (2 ** 0.5)
 		
-		vector_angle = math.atan2(vector.y, vector.x)
+		vector_angle = math.atan2(vector[1], vector[0])
 		angle_diff = self.normalize_angle(vector_angle - tank.angle)
 		
 		if vector_mag == 0:
 			angle_diff = 0
 		
-		command = Command(tank.index, vector_mag, angle_diff, True)
+		command = Command(tank.index, vector_mag, angle_diff, False)
 		
 		
 		# Append the command
@@ -94,14 +95,24 @@ class Agent(object):
 			angle -= 2 * math.pi
 		return angle / math.pi
 		
-	def combine_fields(self, field1, field2, weight1, weight2):
-		field = []
-		for c in range(len(field1)):
-			col = []			
-			for r in range(len(field1[c])):
-				col.append(field1[c][r] * weight1 + field2[c][r] * weight2)
-			field.append(col)
-		return field
+	def combine_fields(self, field1, field2, weight1, weight2):	
+		field_x = []
+		field_y = []
+		for c in range(len(field1[0])):
+			col_x = []
+			col_y = []
+			for r in range(len(field1[0][c])):
+				new_dx = weight1 * field1[0][c][r] + weight2 * field2[0][c][r]
+				new_dy = weight1 * field1[1][c][r] + weight2 * field2[1][c][r]
+				magnitude = (new_dx ** 2 + new_dy ** 2) ** 0.5
+				scale_factor = 1
+				if magnitude > 1:
+					scale_factor = magnitude
+				col_x.append(new_dx / scale_factor)
+				col_y.append(new_dy / scale_factor)
+			field_x.append(col_x)
+			field_y.append(col_y)
+		return [field_x, field_y]
 		
 	def combine_all_fields(self, fields, weights):
 		scaled_weights = self.normalize_weights(weights)
@@ -131,31 +142,15 @@ class Agent(object):
 		if(len(self.no_flag_pot_field) == 0):
 			self.no_flag_pot_field = self.build_no_flag_pot_field()
 			self.have_flag_pot_field = self.build_have_flag_pot_field()
-			
-		field = self.no_flag_pot_field
-		
-		#If there are any dynamic potential fields, add them in here
-		
-		if(not self.shown_graph):
-			global field_to_render
-			field_to_render = field
-			show_field.plot_single(render_field, [], 'test.png')
-			self.shown_graph = True
-		
-		return field
 		
 	def build_no_flag_pot_field(self):
-		enemy_flag = self.flags[random.randrange(0, len(self.flags))]
+		enemy_flag = self.flags[random.randint(0, len(self.flags))]
 		while enemy_flag.color == self.constants['team']:
-			enemy_flag = self.flags[random.randrange(0, len(self.flags))]
+			enemy_flag = self.flags[random.randint(0, len(self.flags))]
 		
-		enemy_flag_field = self.build_attractive_field(enemy_flag.x + 400, enemy_flag.y + 400, 1, 5)
+		enemy_flag_field = self.build_attractive_field(self.world_to_field_coord(enemy_flag.x), self.world_to_field_coord(enemy_flag.y), 1, 1)
 		obstacle_field = self.build_obstacle_field()
 		return self.combine_fields(enemy_flag_field, obstacle_field, 1, 2)
-		
-		#field = [[PotVector(0,0) for j in range(self.get_world_size())] for i in range(self.get_world_size())]
-		#rep_field = self.build_repulsive_field(blue_flag.x + 400, blue_flag.y + 400, 50, 50)
-		#field = self.combine_fields(rep_field, attr_field)		
 		
 		
 	def build_have_flag_pot_field(self):
@@ -167,11 +162,11 @@ class Agent(object):
 				my_base = base
 				break
 				
-		base_center_x = ((my_base.corner1_x + my_base.corner3_x) / 2) + 400
-		base_center_y = ((my_base.corner1_y + my_base.corner3_y ) / 2) + 400
-		base_radius = abs(my_base.corner1_x - my_base.corner3_x) / 2
+		base_center_x = self.world_to_field_coord((my_base.corner1_x + my_base.corner3_x) / 2)
+		base_center_y = self.world_to_field_coord((my_base.corner1_y + my_base.corner3_y ) / 2)
+		base_radius = self.world_to_field_dist(abs(my_base.corner1_x - my_base.corner3_x) / 2)
 		
-		base_field =  self.build_attractive_field(base_center_x, base_center_y, base_radius, 10)
+		base_field =  self.build_attractive_field(base_center_x, base_center_y, base_radius, 2)
 		obstacle_field = self.build_obstacle_field()
 		return self.combine_fields(base_field, obstacle_field, 1, 2)
 		
@@ -188,86 +183,115 @@ class Agent(object):
 			x_max = sorted_x[-1][0]
 			y_min = sorted_y[0][1]
 			y_max = sorted_y[-1][1]
-			center_x = (x_min + x_max) / 2 + 400
-			center_y = (y_min + y_max) / 2 + 400
-			radius = max(x_max - x_min, y_max - y_min) / 2
-			obs_field = self.build_repulsive_field(center_x, center_y, radius, 50)
+			center_x = self.world_to_field_coord((x_min + x_max) / 2)
+			center_y = self.world_to_field_coord((y_min + y_max) / 2)
+			radius = self.world_to_field_dist(max(x_max - x_min, y_max - y_min) / 2)
+			obs_respulse_field = self.build_repulsive_field(center_x, center_y, radius, 5)
+			obs_tangent_field = self.build_tangential_field(center_x, center_y, radius, 5)
+			obs_field = self.combine_fields(obs_respulse_field, obs_tangent_field, 1, 0.5)
 			obs_fields.append(obs_field);
 			weights.append(1)
 			
 		result = self.combine_all_fields(obs_fields, weights)
-		
 		return result
 				
 		
 	def build_attractive_field(self, center_x, center_y, r, s):
-		result = []
-		for x in range(0, self.get_world_size()):
-			col = []
-			for y in range(0, self.get_world_size()):
+		
+		#result = []
+		result_x = zeros((self.get_field_size(), self.get_field_size()))
+		result_y = zeros((self.get_field_size(), self.get_field_size()))
+		
+		for x in range(0, self.get_field_size()):
+			#col = []
+			for y in range(0, self.get_field_size()):
+				
 				d = ((center_x - x) ** 2 + (center_y - y) ** 2) ** 0.5
 				angle = math.atan2(center_y - y , center_x - x)
 				if d < r:
-					col.append(PotVector(0, 0))
+					continue
+					#col.append(PotVector(0, 0))
 				elif d >= r and d <= r + s:
 					dx = (d - r)/s * math.cos(angle)
 					dy = (d - r)/s * math.sin(angle)
-					col.append(PotVector(dx, dy))
+					#col.append(PotVector(dx, dy))
+					result_x[x][y] = dx
+					result_y[x][y] = dy
 				else:
 					dx = math.cos(angle)
 					dy = math.sin(angle)
-					col.append(PotVector(dx, dy))
-			result.append(col)
-		return result
+					#col.append(PotVector(dx, dy))
+					result_x[x][y] = dx
+					result_y[x][y] = dy
+			#result.append(col)
+		return [result_x,result_y]
 	
 	
 	def build_repulsive_field(self, center_x, center_y, r, s):
 		
-		result = []
-		for x in range(0, self.get_world_size()):
-			col = []
-			for y in range(0, self.get_world_size()):
+		result_x = zeros((self.get_field_size(), self.get_field_size()))
+		result_y = zeros((self.get_field_size(), self.get_field_size()))
+		
+		sin_45 = (2 ** 0.5) / 2
+		
+		for x in range(0, self.get_field_size()):
+			for y in range(0, self.get_field_size()):
+				
 				d = ((center_x - x) ** 2 + (center_y - y) ** 2) ** 0.5
 				angle = math.atan2(center_y - y , center_x - x)
 				if d < r:
-					dx = 1.0 if math.cos(angle) < 0 else -1.0
-					dy = 1.0 if math.sin(angle) < 0 else -1.0
-					col.append(PotVector(dx, dy))
+					dx = sin_45 if math.cos(angle) < 0 else -(sin_45)
+					dy = sin_45 if math.sin(angle) < 0 else -(sin_45)
+					result_x[x][y] = dx
+					result_y[x][y] = dy
 				elif d >= r and d < r + s:
 					dx = -(s + r - d)/s * math.cos(angle)
 					dy = -(s + r - d)/s * math.sin(angle)
-					col.append(PotVector(dx, dy))
+					result_x[x][y] = dx
+					result_y[x][y] = dy
 				else:
-					col.append(PotVector(0, 0))
-			result.append(col)
-		return result
+					continue
+		return [result_x,result_y]
+	
+	def build_tangential_field(self, center_x, center_y, r, s):
+		result_x = zeros((self.get_field_size(), self.get_field_size()))
+		result_y = zeros((self.get_field_size(), self.get_field_size()))
+		
+		for x in range(0, self.get_field_size()):
+			for y in range(0, self.get_field_size()):
+				
+				d = ((center_x - x) ** 2 + (center_y - y) ** 2) ** 0.5
+				angle = math.atan2(center_y - y , center_x - x) + (math.pi / 2)
+				if d >= r and d < r + s:
+					dx = -(s + r - d)/s * math.cos(angle)
+					dy = -(s + r - d)/s * math.sin(angle)
+					result_x[x][y] = dx
+					result_y[x][y] = dy
+				else:
+					continue
+		return [result_x,result_y]
+	
+	def build_random_field(self):
+		result_x = zeros((self.get_field_size(), self.get_field_size()))
+		result_y = zeros((self.get_field_size(), self.get_field_size()))
+		
+		for x in range(0, self.get_field_size()):
+			for y in range(0, self.get_field_size()):
+				result_x[x][y] = random.random()
+				result_y[x][y] = random.random()
+		return [result_x,result_y]
 	
 	def get_world_size(self):
 		return int(self.constants['worldsize'])
-		
-class PotVector(object):
-	"""Vectors in a potential field. Values range from -1 to 1. Top-left is -1, -1, bottom-right is 1,1"""
 	
-	def __init__(self, x, y):
-		self.x = x
-		self.y = y
-	
-	"""OPERATOR OVERLOADING OF THE OPERATOR FOR THE POTVECTOR CLASS"""
-	def __add__(self, other):
-		return PotVector(self.x + other.x,self.y + other.y)
+	def get_field_size(self):
+		return self.get_world_size() / 10
 
-	def __mul__(self, other):
-		return PotVector(other * self.x, other * self.y)
+	def world_to_field_coord(self, val):
+		return (val + (self.get_world_size() / 2)) / 10
 		
-	def __rmul__(self, other):
-		return PotVector(other * self.x, other * self.y)
-
-
-def render_field(x, y, res):
-	x = 399 if x == 400 else x
-	y = 399 if y == 400 else y
-	vector = field_to_render[x + 400][y + 400]
-	return vector.x * res, vector.y * res
+	def world_to_field_dist(self, val):
+		return val / 10
 
 def main():
 	# Process CLI arguments.
